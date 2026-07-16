@@ -1,7 +1,7 @@
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
-import { confirmAsync } from '../../lib/confirm';
 import { supabase } from '../../lib/supabase';
 import { radius, type as typeScale, useTheme } from '../../lib/theme';
 import type { ConnectionWithProfile } from '../../lib/types';
@@ -38,25 +38,18 @@ export function TrainerHome() {
     loadConnections();
   }, [loadConnections]);
 
+  // Reload when returning from a client detail screen (e.g. after removal).
+  useFocusEffect(
+    useCallback(() => {
+      loadConnections();
+    }, [loadConnections])
+  );
+
   async function shareInviteCode() {
     if (!profile?.invite_code) return;
     await Share.share({
       message: `Join me on PTgo — create a client account and enter invite code ${profile.invite_code} to connect.`,
     });
-  }
-
-  async function removeClient(connection: ConnectionRow) {
-    const confirmed = await confirmAsync(
-      'Remove client',
-      `${connection.client.name || 'This client'} will lose access to programs you assigned. Their own logged data stays theirs.`,
-      'Remove'
-    );
-    if (!confirmed) return;
-    const { error } = await supabase
-      .from('trainer_clients')
-      .update({ status: 'ended', ended_at: new Date().toISOString() })
-      .eq('id', connection.id);
-    if (!error) loadConnections();
   }
 
   return (
@@ -91,6 +84,29 @@ export function TrainerHome() {
         <Button title="Share invite code" variant="outline" onPress={shareInviteCode} />
       </View>
 
+      <View
+        style={{
+          backgroundColor: theme.surface2,
+          borderRadius: radius.card,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.border,
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/programs')}
+          style={({ pressed }) => [styles.listRow, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={[typeScale.cardTitle, { color: theme.textPrimary }]}>Programs</Text>
+            <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
+              Build workout programs to assign to clients
+            </Text>
+          </View>
+          <Text style={[typeScale.cardTitle, { color: theme.textMuted }]}>›</Text>
+        </Pressable>
+      </View>
+
       {loadError && (
         <View style={{ backgroundColor: theme.danger.bg, borderRadius: 8, padding: 12 }}>
           <Text style={[typeScale.body, { color: theme.danger.text }]}>{loadError}</Text>
@@ -111,10 +127,13 @@ export function TrainerHome() {
           }}
         >
           {connections.map((connection, index) => (
-            <View
+            <Pressable
               key={connection.id}
-              style={[
+              accessibilityRole="button"
+              onPress={() => router.push(`/clients/${connection.client.id}`)}
+              style={({ pressed }) => [
                 styles.listRow,
+                { opacity: pressed ? 0.7 : 1 },
                 index > 0 && {
                   borderTopWidth: StyleSheet.hairlineWidth,
                   borderTopColor: theme.border,
@@ -130,10 +149,8 @@ export function TrainerHome() {
                   Client since {new Date(connection.started_at).toLocaleDateString()}
                 </Text>
               </View>
-              <Pressable onPress={() => removeClient(connection)} hitSlop={8}>
-                <Text style={[typeScale.secondary, { color: theme.danger.text }]}>Remove</Text>
-              </Pressable>
-            </View>
+              <Text style={[typeScale.cardTitle, { color: theme.textMuted }]}>›</Text>
+            </Pressable>
           ))}
         </View>
       )}
