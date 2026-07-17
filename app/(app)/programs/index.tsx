@@ -63,6 +63,9 @@ export default function ProgramsScreen() {
       </Pressable>
 
       <Text style={[typeScale.screenTitle, { color: theme.textPrimary }]}>Programs</Text>
+      <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
+        Templates that bundle library workouts so you can assign a whole block in one tap.
+      </Text>
 
       {error && (
         <View style={{ backgroundColor: theme.danger.bg, borderRadius: 8, padding: 12 }}>

@@ -94,13 +94,35 @@ export function TrainerHome() {
       >
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push('/programs')}
+          onPress={() => router.push('/workouts')}
           style={({ pressed }) => [styles.listRow, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={[typeScale.cardTitle, { color: theme.textPrimary }]}>
+              Workout library
+            </Text>
+            <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
+              Build reusable workouts, then schedule them per client
+            </Text>
+          </View>
+          <Text style={[typeScale.cardTitle, { color: theme.textMuted }]}>›</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/programs')}
+          style={({ pressed }) => [
+            styles.listRow,
+            { opacity: pressed ? 0.7 : 1 },
+            {
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: theme.border,
+            },
+          ]}
         >
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[typeScale.cardTitle, { color: theme.textPrimary }]}>Programs</Text>
             <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
-              Build workout programs to assign to clients
+              Saved bundles of workouts to assign in one tap
             </Text>
           </View>
           <Text style={[typeScale.cardTitle, { color: theme.textMuted }]}>›</Text>

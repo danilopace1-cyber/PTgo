@@ -1,199 +1,112 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../../components/Button';
 import { Screen } from '../../../components/Screen';
-import { TextField } from '../../../components/TextField';
 import { confirmAsync } from '../../../lib/confirm';
 import { supabase } from '../../../lib/supabase';
 import { radius, type as typeScale, useTheme } from '../../../lib/theme';
-import type { Exercise, Program, ProgramWorkout, WorkoutExerciseRow } from '../../../lib/types';
+import {
+  WEEKDAY_LABELS,
+  WEEKDAYS,
+  type Program,
+  type ProgramWorkoutRow,
+  type Weekday,
+  type Workout,
+} from '../../../lib/types';
 
-type SearchResult = Pick<Exercise, 'id' | 'name' | 'equipment' | 'primary_muscles'>;
-
-export default function ProgramBuilderScreen() {
+// Template editor: a program is a saved bundle of library workouts plus a
+// default weekly layout. Assigning pre-fills the per-client schedule.
+export default function ProgramTemplateScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
 
   const [program, setProgram] = useState<Pick<Program, 'id' | 'name'> | null>(null);
-  const [workouts, setWorkouts] = useState<ProgramWorkout[]>([]);
-  const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(null);
-  const [exercises, setExercises] = useState<WorkoutExerciseRow[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ sets: '3', reps: '8', rest: '90', notes: '' });
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [rows, setRows] = useState<ProgramWorkoutRow[]>([]);
+  const [library, setLibrary] = useState<Pick<Workout, 'id' | 'name'>[]>([]);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadProgram = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!id) return;
-    const [programRes, workoutRes] = await Promise.all([
+    const [programRes, rowsRes, libraryRes] = await Promise.all([
       supabase.from('programs').select('id, name').eq('id', id).maybeSingle<Program>(),
       supabase
         .from('program_workouts')
-        .select('*')
+        .select('*, workout:workouts(id, name)')
         .eq('program_id', id)
         .order('position')
-        .returns<ProgramWorkout[]>(),
+        .returns<ProgramWorkoutRow[]>(),
+      supabase.from('workouts').select('id, name').order('name').returns<Workout[]>(),
     ]);
-    setError(programRes.error?.message ?? workoutRes.error?.message ?? null);
+    setError(programRes.error?.message ?? rowsRes.error?.message ?? libraryRes.error?.message ?? null);
     setProgram(programRes.data);
-    setWorkouts(workoutRes.data ?? []);
-    setSelectedWorkoutId((current) => current ?? workoutRes.data?.[0]?.id ?? null);
+    setRows(rowsRes.data ?? []);
+    setLibrary(libraryRes.data ?? []);
   }, [id]);
 
-  const loadExercises = useCallback(async () => {
-    if (!selectedWorkoutId) {
-      setExercises([]);
-      return;
-    }
-    const { data, error: loadError } = await supabase
-      .from('workout_exercises')
-      .select('*, exercise:exercises(id, name, equipment, primary_muscles)')
-      .eq('program_workout_id', selectedWorkoutId)
-      .order('position')
-      .returns<WorkoutExerciseRow[]>();
-    if (loadError) setError(loadError.message);
-    setExercises(data ?? []);
-  }, [selectedWorkoutId]);
-
   useEffect(() => {
-    loadProgram();
-  }, [loadProgram]);
+    load();
+  }, [load]);
 
-  useEffect(() => {
-    loadExercises();
-  }, [loadExercises]);
-
-  useEffect(() => {
-    const query = search.trim();
-    if (query.length < 2) {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('exercises')
-        .select('id, name, equipment, primary_muscles')
-        .ilike('name', `%${query}%`)
-        .order('name')
-        .limit(20)
-        .returns<SearchResult[]>();
-      if (!cancelled) setResults(data ?? []);
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [search]);
-
-  async function addWorkout() {
+  async function addWorkout(workout: Pick<Workout, 'id' | 'name'>) {
     if (!id) return;
-    const name = `Day ${workouts.length + 1}`;
-    const { data, error: insertError } = await supabase
-      .from('program_workouts')
-      .insert({ program_id: id, name, position: workouts.length })
-      .select('*')
-      .single<ProgramWorkout>();
-    if (insertError || !data) {
-      setError(insertError?.message ?? 'Could not add workout.');
-      return;
-    }
-    setWorkouts((current) => [...current, data]);
-    setSelectedWorkoutId(data.id);
-  }
-
-  async function deleteWorkout() {
-    const workout = workouts.find((candidate) => candidate.id === selectedWorkoutId);
-    if (!workout) return;
-    const confirmed = await confirmAsync(
-      'Delete day',
-      `${workout.name} and its exercises will be removed from this program.`,
-      'Delete'
-    );
-    if (!confirmed) return;
-    const { error: deleteError } = await supabase
-      .from('program_workouts')
-      .delete()
-      .eq('id', workout.id);
-    if (deleteError) {
-      setError(deleteError.message);
-      return;
-    }
-    setSelectedWorkoutId(null);
-    loadProgram();
-  }
-
-  async function addExercise(result: SearchResult) {
-    if (!selectedWorkoutId) return;
-    const { error: insertError } = await supabase.from('workout_exercises').insert({
-      program_workout_id: selectedWorkoutId,
-      exercise_id: result.id,
-      position: exercises.length,
+    const { error: insertError } = await supabase.from('program_workouts').insert({
+      program_id: id,
+      workout_id: workout.id,
+      position: rows.length,
     });
     if (insertError) {
       setError(insertError.message);
       return;
     }
-    setSearch('');
-    setResults([]);
-    loadExercises();
+    setAdding(false);
+    load();
   }
 
-  function openEditor(row: WorkoutExerciseRow) {
-    setExpandedId(row.id);
-    setDraft({
-      sets: String(row.target_sets),
-      reps: row.target_reps,
-      rest: String(row.rest_seconds),
-      notes: row.notes ?? '',
-    });
-  }
-
-  async function saveEditor(row: WorkoutExerciseRow) {
-    const sets = Number.parseInt(draft.sets, 10);
-    const rest = Number.parseInt(draft.rest, 10);
-    if (!Number.isFinite(sets) || sets < 1 || sets > 20) {
-      setError('Sets must be between 1 and 20.');
-      return;
-    }
-    if (!Number.isFinite(rest) || rest < 0 || rest > 3600) {
-      setError('Rest must be between 0 and 3600 seconds.');
-      return;
-    }
+  async function setWeekday(row: ProgramWorkoutRow, weekday: Weekday | null) {
     const { error: updateError } = await supabase
-      .from('workout_exercises')
-      .update({
-        target_sets: sets,
-        target_reps: draft.reps.trim() || '8',
-        rest_seconds: rest,
-        notes: draft.notes.trim() || null,
-      })
+      .from('program_workouts')
+      .update({ weekday })
       .eq('id', row.id);
     if (updateError) {
       setError(updateError.message);
       return;
     }
-    setError(null);
-    setExpandedId(null);
-    loadExercises();
+    setRows((current) =>
+      current.map((candidate) =>
+        candidate.id === row.id ? { ...candidate, weekday } : candidate
+      )
+    );
   }
 
-  async function removeExercise(row: WorkoutExerciseRow) {
+  async function removeRow(row: ProgramWorkoutRow) {
     const { error: deleteError } = await supabase
-      .from('workout_exercises')
+      .from('program_workouts')
       .delete()
       .eq('id', row.id);
     if (deleteError) {
       setError(deleteError.message);
       return;
     }
-    setExpandedId(null);
-    loadExercises();
+    load();
   }
 
-  const selectedWorkout = workouts.find((candidate) => candidate.id === selectedWorkoutId);
+  async function deleteProgram() {
+    if (!program) return;
+    const confirmed = await confirmAsync(
+      'Delete program',
+      `${program.name} will be removed. Library workouts and clients' assigned copies are unaffected.`,
+      'Delete'
+    );
+    if (!confirmed) return;
+    const { error: deleteError } = await supabase.from('programs').delete().eq('id', program.id);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    router.back();
+  }
 
   return (
     <Screen>
@@ -204,214 +117,135 @@ export default function ProgramBuilderScreen() {
       <Text style={[typeScale.screenTitle, { color: theme.textPrimary }]}>
         {program?.name ?? 'Program'}
       </Text>
+      <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
+        A bundle of library workouts with a default weekly layout. You can rearrange days
+        per client when assigning.
+      </Text>
 
       {error && (
-        <View style={{ backgroundColor: theme.danger.bg, borderRadius: 8, padding: 12 }}>
+        <View style={{ backgroundColor: theme.danger.bg, borderRadius: radius.control, padding: 12 }}>
           <Text style={[typeScale.body, { color: theme.danger.text }]}>{error}</Text>
         </View>
       )}
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-        {workouts.map((workout) => {
-          const selected = workout.id === selectedWorkoutId;
-          return (
-            <Pressable
-              key={workout.id}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
-              onPress={() => {
-                setSelectedWorkoutId(workout.id);
-                setExpandedId(null);
-              }}
+      {rows.length === 0 ? (
+        <Text style={[typeScale.body, { color: theme.textMuted, paddingVertical: 8 }]}>
+          No workouts in this program yet. Add some from your library below.
+        </Text>
+      ) : (
+        <View
+          style={{
+            backgroundColor: theme.surface2,
+            borderRadius: radius.card,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.border,
+          }}
+        >
+          {rows.map((row, index) => (
+            <View
+              key={row.id}
               style={[
-                styles.pill,
-                {
-                  backgroundColor: selected ? theme.fillPrimary : theme.surface2,
-                  borderColor: selected ? theme.fillPrimary : theme.borderStrong,
+                { padding: 16, gap: 10 },
+                index > 0 && {
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: theme.border,
                 },
               ]}
             >
-              <Text
-                style={[
-                  typeScale.body,
-                  { color: selected ? theme.onFillPrimary : theme.textPrimary },
-                ]}
-              >
-                {workout.name}
-              </Text>
-            </Pressable>
-          );
-        })}
-        <Pressable
-          accessibilityRole="button"
-          onPress={addWorkout}
-          style={[styles.pill, styles.addPill, { borderColor: theme.borderStrong }]}
-        >
-          <Text style={[typeScale.body, { color: theme.textSecondary }]}>+ Add day</Text>
-        </Pressable>
-      </ScrollView>
-
-      {selectedWorkout ? (
-        <>
-          {exercises.length === 0 ? (
-            <Text style={[typeScale.body, { color: theme.textMuted, paddingVertical: 8 }]}>
-              No exercises in {selectedWorkout.name} yet. Search the library below to add some.
-            </Text>
-          ) : (
-            <View
-              style={{
-                backgroundColor: theme.surface2,
-                borderRadius: radius.card,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.border,
-              }}
-            >
-              {exercises.map((row, index) => {
-                const expanded = expandedId === row.id;
-                return (
-                  <View
-                    key={row.id}
-                    style={
-                      index > 0 && {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: theme.border,
-                      }
-                    }
-                  >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <Text style={[typeScale.cardTitle, { flex: 1, color: theme.textPrimary }]}>
+                  {row.workout.name}
+                </Text>
+                <Pressable onPress={() => removeRow(row)} hitSlop={8}>
+                  <Text style={[typeScale.secondary, { color: theme.danger.text }]}>Remove</Text>
+                </Pressable>
+              </View>
+              <View style={styles.weekdayRow}>
+                {WEEKDAYS.map((weekday) => {
+                  const selected = row.weekday === weekday;
+                  return (
                     <Pressable
+                      key={weekday}
                       accessibilityRole="button"
-                      onPress={() => (expanded ? setExpandedId(null) : openEditor(row))}
-                      style={({ pressed }) => [styles.listRow, { opacity: pressed ? 0.7 : 1 }]}
+                      accessibilityState={{ selected }}
+                      onPress={() => setWeekday(row, selected ? null : weekday)}
+                      style={[
+                        styles.weekdayPill,
+                        {
+                          backgroundColor: selected ? theme.fillPrimary : theme.surface1,
+                          borderColor: selected ? theme.fillPrimary : theme.border,
+                        },
+                      ]}
                     >
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={[typeScale.cardTitle, { color: theme.textPrimary }]}>
-                          {row.exercise.name}
-                        </Text>
-                        <Text style={[typeScale.secondary, { color: theme.textMuted }]}>
-                          {row.target_sets} × {row.target_reps} · rest {row.rest_seconds}s
-                          {row.notes ? ` · ${row.notes}` : ''}
-                        </Text>
-                      </View>
-                      <Text style={[typeScale.cardTitle, { color: theme.textMuted }]}>
-                        {expanded ? '˄' : '˅'}
+                      <Text
+                        style={[
+                          typeScale.metadata,
+                          { color: selected ? theme.onFillPrimary : theme.textSecondary },
+                        ]}
+                      >
+                        {WEEKDAY_LABELS[weekday]}
                       </Text>
                     </Pressable>
-
-                    {expanded && (
-                      <View style={styles.editor}>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <View style={{ flex: 1 }}>
-                            <TextField
-                              label="Sets"
-                              value={draft.sets}
-                              onChangeText={(value) => setDraft({ ...draft, sets: value })}
-                              keyboardType="number-pad"
-                            />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <TextField
-                              label="Reps"
-                              value={draft.reps}
-                              onChangeText={(value) => setDraft({ ...draft, reps: value })}
-                              placeholder="8-12"
-                            />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <TextField
-                              label="Rest (s)"
-                              value={draft.rest}
-                              onChangeText={(value) => setDraft({ ...draft, rest: value })}
-                              keyboardType="number-pad"
-                            />
-                          </View>
-                        </View>
-                        <TextField
-                          label="Coach note"
-                          value={draft.notes}
-                          onChangeText={(value) => setDraft({ ...draft, notes: value })}
-                          placeholder="e.g. slow eccentric, 3s down"
-                        />
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <Button
-                            title="Remove"
-                            variant="ghost"
-                            danger
-                            onPress={() => removeExercise(row)}
-                            style={{ flex: 1 }}
-                          />
-                          <Button
-                            title="Save"
-                            variant="outline"
-                            onPress={() => saveEditor(row)}
-                            style={{ flex: 1 }}
-                          />
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+                  );
+                })}
+              </View>
             </View>
-          )}
+          ))}
+        </View>
+      )}
 
-          <TextField
-            label="Add exercise"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search the library, e.g. squat"
-            autoCapitalize="none"
-          />
-
-          {results.length > 0 && (
-            <View
-              style={{
-                backgroundColor: theme.surface2,
-                borderRadius: radius.card,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.border,
-              }}
-            >
-              {results.map((result, index) => (
+      {adding ? (
+        <View
+          style={{
+            backgroundColor: theme.surface1,
+            borderRadius: radius.card,
+            padding: 16,
+            gap: 12,
+          }}
+        >
+          <Text style={[typeScale.cardTitle, { color: theme.textPrimary }]}>
+            Add from library
+          </Text>
+          {library.length === 0 ? (
+            <>
+              <Text style={[typeScale.body, { color: theme.textSecondary }]}>
+                Your library is empty. Create workouts first.
+              </Text>
+              <Button
+                title="Open workout library"
+                variant="outline"
+                onPress={() => router.push('/workouts')}
+              />
+            </>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {library.map((workout) => (
                 <Pressable
-                  key={result.id}
+                  key={workout.id}
                   accessibilityRole="button"
-                  onPress={() => addExercise(result)}
-                  style={({ pressed }) => [
-                    styles.listRow,
-                    { opacity: pressed ? 0.7 : 1 },
-                    index > 0 && {
-                      borderTopWidth: StyleSheet.hairlineWidth,
-                      borderTopColor: theme.border,
-                    },
-                  ]}
+                  onPress={() => addWorkout(workout)}
+                  style={{
+                    backgroundColor: theme.surface2,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    borderRadius: radius.control,
+                    padding: 12,
+                  }}
                 >
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[typeScale.body, { color: theme.textPrimary }]}>
-                      {result.name}
-                    </Text>
-                    <Text style={[typeScale.metadata, { color: theme.textMuted }]}>
-                      {[result.primary_muscles[0], result.equipment]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
-                  </View>
-                  <Text style={[typeScale.body, { color: theme.textSecondary }]}>Add</Text>
+                  <Text style={[typeScale.body, { color: theme.textPrimary }]}>
+                    {workout.name}
+                  </Text>
                 </Pressable>
               ))}
             </View>
           )}
-
-          <Button title="Delete day" variant="ghost" danger onPress={deleteWorkout} />
-        </>
+          <Button title="Cancel" variant="ghost" onPress={() => setAdding(false)} />
+        </View>
       ) : (
-        <Text style={[typeScale.body, { color: theme.textMuted, paddingVertical: 8 }]}>
-          Add a day to start building this program.
-        </Text>
+        <Button title="Add workout" variant="outline" onPress={() => setAdding(true)} />
       )}
 
-      <Text style={[typeScale.secondary, { color: theme.textMuted, textAlign: 'center' }]}>
-        Assign this program from a client's profile on the home screen.
-      </Text>
+      <Button title="Delete program" variant="ghost" danger onPress={deleteProgram} />
     </Screen>
   );
 }
@@ -421,27 +255,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: 'flex-start',
   },
-  pill: {
+  weekdayRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  weekdayPill: {
+    flex: 1,
+    minHeight: 32,
     borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 16,
-    minHeight: 44,
+    borderRadius: radius.control,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  addPill: {
-    borderStyle: 'dashed',
-    backgroundColor: 'transparent',
-  },
-  listRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-  },
-  editor: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 12,
   },
 });
