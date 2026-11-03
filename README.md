@@ -1,5 +1,7 @@
 # PTgo
 
+PROJECT PAUSED
+
 A workout tracker built around the personal trainer ↔ client relationship. See
 [ptgo-spec.md](./ptgo-spec.md) for the full product spec.
 
